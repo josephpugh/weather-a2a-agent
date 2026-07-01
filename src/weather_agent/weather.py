@@ -1,12 +1,17 @@
-"""The weather tool.
+"""The weather tools.
 
-This module contains the single tool exposed by the agent. It is deliberately
-small and self-contained so it reads as a clean example of:
+This module contains the tools exposed by the agent. It is deliberately small
+and self-contained so it reads as a clean example of:
 
 * an ``async`` function tool that performs real I/O (two Open-Meteo calls: first
-  geocoding a city name into coordinates, then fetching the current weather), and
+  geocoding a city name into coordinates, then fetching the current weather),
 * a tool that requires **human approval** before it runs, expressed with
-  ``@tool(approval_mode="always_require")``.
+  ``@tool(approval_mode="always_require")`` (``get_current_weather``), and
+* a read-only tool that never requires approval, expressed with
+  ``@tool(approval_mode="never_require")`` (``get_geocode_location``).
+
+Both tools share the same ``geocode_city`` lookup rather than each making their
+own Open-Meteo geocoding call.
 
 The Agent Framework turns the decorated function into a ``FunctionTool``,
 deriving the JSON schema for the arguments from the type annotations and the
@@ -15,7 +20,7 @@ description from the docstring.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Annotated
 
 import httpx
@@ -145,3 +150,20 @@ async def get_current_weather(
     of invoking the function; the caller must approve it before the weather is fetched.
     """
     return await get_weather_report(city)
+
+
+@tool(approval_mode="never_require")
+async def get_geocode_location(
+    city: Annotated[str, "The city to geocode, e.g. 'Paris' or 'Tokyo, Japan'."],
+) -> dict[str, str | float] | str:
+    """Resolve a city name to its canonical name, country, and coordinates.
+
+    This is a read-only lookup with no side effects, so unlike
+    ``get_current_weather`` it never requires human approval.
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            location = await geocode_city(city, client=client)
+        except WeatherError as exc:
+            return str(exc)
+    return asdict(location)

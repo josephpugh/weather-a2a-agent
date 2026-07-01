@@ -18,15 +18,20 @@ ASGI app (assembled from the `a2a-sdk` route builders) served by
 
 It demonstrates four things end to end:
 
-1. **A tool that calls a real service** — `get_current_weather` geocodes a city with
-   [Open-Meteo](https://open-meteo.com/) and returns the current conditions.
+1. **Two tools that call a real service**, with different approval postures —
+   `get_current_weather` geocodes a city with [Open-Meteo](https://open-meteo.com/)
+   and returns the current conditions, while `get_geocode_location` exposes just
+   the geocoding step (city → name/country/coordinates) as its own read-only tool.
+   Both share the same `geocode_city` lookup.
 2. **Full A2A compliance** — the agent is exposed over the A2A protocol with an
    AgentCard and a JSON-RPC endpoint, using the framework's `A2AExecutor`.
 3. **In-memory session state** — conversation history is retained per A2A
    `context_id` using the framework's built-in `InMemoryHistoryProvider`.
-4. **Human-in-the-loop approval** — the weather tool is declared
+4. **Human-in-the-loop approval** — `get_current_weather` is declared
    `@tool(approval_mode="always_require")`, and the server enforces an
    allow/deny decision over A2A using the `input-required` task state.
+   `get_geocode_location` is declared `@tool(approval_mode="never_require")`
+   since it's a read-only lookup with no side effects, so it runs immediately.
 
 ## How it fits together
 
@@ -39,12 +44,14 @@ A2A client ──JSON-RPC──▶ Starlette app ──▶ DefaultRequestHandler
                                               ▼
                                     Agent (weather_agent/agent.py)
                              ├─ InMemoryHistoryProvider  (session state)
-                             └─ get_current_weather      (approval-gated tool)
+                             ├─ get_current_weather      (approval-gated tool)
+                             └─ get_geocode_location     (never needs approval)
 ```
 
 | Concern | Where | Key API |
 | --- | --- | --- |
-| Weather tool | `weather_agent/weather.py` | `@tool(approval_mode="always_require")` |
+| Weather tool (approval-gated) | `weather_agent/weather.py` | `@tool(approval_mode="always_require")` |
+| Geocode tool (no approval) | `weather_agent/weather.py` | `@tool(approval_mode="never_require")` |
 | Agent + memory | `weather_agent/agent.py` | `Agent(..., context_providers=[InMemoryHistoryProvider()])` |
 | A2A HITL executor | `weather_agent/a2a_executor.py` | `TaskUpdater.requires_input()`, `TaskState.TASK_STATE_INPUT_REQUIRED` |
 | Approval wire format | `weather_agent/a2a_encoding.py` | message `metadata` |
@@ -53,8 +60,9 @@ A2A client ──JSON-RPC──▶ Starlette app ──▶ DefaultRequestHandler
 
 ## The human-in-the-loop flow
 
-Because the weather tool requires approval, a single user question becomes a
-**two-message A2A exchange** that shares one `context_id`:
+Because `get_current_weather` requires approval (unlike `get_geocode_location`,
+which runs immediately), a single weather question becomes a **two-message A2A
+exchange** that shares one `context_id`:
 
 1. **Client → server**: `message:send` with `"What's the weather in Paris?"`.
    The agent decides to call `get_current_weather`, but the tool is approval-gated,
@@ -107,6 +115,8 @@ pytest
 ```
 
 The suite runs fully offline (Open-Meteo HTTP calls are mocked with `respx`, and
-the LLM is the scripted client). It covers the tool, the approval semantics
-(approve **and** deny), session-state persistence across A2A turns, the wire
-encoding, the executor's `input-required` round-trip, and the served AgentCard.
+the LLM is the scripted client). It covers both tools (including that
+`get_geocode_location` never triggers approval), the approval semantics for
+`get_current_weather` (approve **and** deny), session-state persistence across
+A2A turns, the wire encoding, the executor's `input-required` round-trip, and
+the served AgentCard.

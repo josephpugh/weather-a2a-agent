@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from weather_agent import weather
-from weather_agent.weather import get_current_weather, get_weather_report
+from weather_agent.weather import get_current_weather, get_geocode_location, get_weather_report
 
 
 async def test_get_weather_report_success():
@@ -44,6 +44,32 @@ def test_tool_requires_approval():
     # will pause for a human decision before invoking it.
     assert get_current_weather.name == "get_current_weather"
     assert get_current_weather.approval_mode == "always_require"
+
+
+async def test_get_geocode_location_success():
+    location = await get_geocode_location(city="Paris")
+    assert location == {"name": "Paris", "country": "France", "latitude": 48.85, "longitude": 2.35}
+
+
+async def test_get_geocode_location_city_not_found(open_meteo):
+    open_meteo.get(weather.GEOCODING_URL).mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+    result = await get_geocode_location(city="Nowheresville")
+    assert "Could not find" in result
+
+
+async def test_get_geocode_location_does_not_call_forecast(open_meteo):
+    await get_geocode_location(city="Paris")
+    geocode_route, forecast_route = open_meteo.routes
+    assert geocode_route.called
+    assert not forecast_route.called
+
+
+def test_geocode_tool_never_requires_approval():
+    # Unlike get_current_weather, this is a read-only lookup with no side effects.
+    assert get_geocode_location.name == "get_geocode_location"
+    assert get_geocode_location.approval_mode == "never_require"
 
 
 @pytest.mark.parametrize(

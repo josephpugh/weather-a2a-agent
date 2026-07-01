@@ -19,14 +19,16 @@ import os
 
 from agent_framework import Agent, BaseChatClient, InMemoryHistoryProvider
 
-from .weather import get_current_weather
+from .weather import get_current_weather, get_geocode_location
 
 INSTRUCTIONS = (
     "You are a helpful weather assistant. "
     "When a user asks about the weather, call the get_current_weather tool with the city name. "
     "That tool requires human approval before it runs, so it may pause; once you receive the "
     "result, answer the user in a friendly, concise sentence. "
-    "If the tool reports it could not find a location, ask the user to clarify the city."
+    "If the tool reports it could not find a location, ask the user to clarify the city. "
+    "If a user only asks for a city's coordinates or location (not the weather), use the "
+    "get_geocode_location tool instead — it never requires approval."
 )
 
 
@@ -44,7 +46,7 @@ def build_weather_agent(chat_client: BaseChatClient | None = None) -> Agent:
         name="Weather Agent",
         description="Provides current weather for any city, with human approval before each lookup.",
         instructions=INSTRUCTIONS,
-        tools=[get_current_weather],
+        tools=[get_current_weather, get_geocode_location],
         # The built-in in-memory history provider keeps session state keyed by
         # session id (which the A2A executor sets to the A2A context_id).
         context_providers=[InMemoryHistoryProvider()],
