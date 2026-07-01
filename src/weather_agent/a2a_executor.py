@@ -30,7 +30,7 @@ from a2a.server.agent_execution import RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, TaskState
-from agent_framework import Message
+from agent_framework import AgentSession, Message
 from agent_framework.a2a import A2AExecutor
 
 from . import a2a_encoding as enc
@@ -45,6 +45,11 @@ class ApprovalA2AExecutor(A2AExecutor):
         super().__init__(agent, stream=False, run_kwargs=run_kwargs)
         # context_id -> {call_id -> PendingApproval}
         self._pending: dict[str, dict[str, enc.PendingApproval]] = {}
+        # context_id -> AgentSession, so conversation history (including a
+        # paused tool call awaiting approval) survives across A2A requests.
+        # ``Agent.create_session`` always returns a fresh, empty session, so
+        # the executor itself must hold onto sessions between calls.
+        self._sessions: dict[str, AgentSession] = {}
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         if context.context_id is None:
@@ -63,9 +68,14 @@ class ApprovalA2AExecutor(A2AExecutor):
         try:
             await updater.start_work()
 
-            # Session is keyed on the A2A context_id; the InMemoryHistoryProvider
-            # rehydrates prior turns (including any paused tool call) from it.
-            session = self._agent.create_session(session_id=context.context_id)
+            # Session is keyed on the A2A context_id; reusing the same
+            # AgentSession instance across calls is what lets the
+            # InMemoryHistoryProvider retain prior turns (including any
+            # paused tool call) — ``create_session`` itself always returns
+            # a fresh, empty session.
+            session = self._sessions.setdefault(
+                context.context_id, self._agent.create_session(session_id=context.context_id)
+            )
 
             query = self._build_query(context)
             response = await self._agent.run(query, session=session, **self._run_kwargs)
